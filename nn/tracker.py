@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 ######################################################################
 ######################################################################
 #  Copyright Tsung-Hsien Wen, Cambridge Dialogue Systems Group, 2017 #
@@ -60,27 +61,33 @@ class CNNInformableTracker(BaseNNModule):
             b_jm1v, b_jm1N, ngms_j, ngmt_jm1, uttms_j, uttmt_jm1):
 
         # source features
-        ssrcemb_jsv = T.sum(ngms_j[ssrcpos_jsv,:],axis=0)
-        vsrcemb_jsv = T.sum(ngms_j[vsrcpos_jsv,:],axis=0)
-        src_jsv = T.concatenate([ssrcemb_jsv,vsrcemb_jsv,uttms_j],axis=0)
+        ssrcemb_djsv = T.sum(ngms_j[ssrcpos_jsv,:],axis=0)  # 对n-gram vector作抽取并加和，提取了slot的特征
+        vsrcemb_jsv = T.sum(ngms_j[vsrcpos_jsv,:],axis=0)  # 体现了value的特征
+        src_jsv = T.concatenate([ssrcemb_djsv,vsrcemb_jsv,uttms_j],axis=0)  # ftv,cnn, u
         # target features
         staremb_jsv = T.sum(ngmt_jm1[starpos_jsv,:],axis=0)
         vtaremb_jsv = T.sum(ngmt_jm1[vtarpos_jsv,:],axis=0)
-        tar_jsv = T.concatenate([staremb_jsv,vtaremb_jsv,uttmt_jm1],axis=0)
-        # update g_jv 
+        tar_jsv = T.concatenate([staremb_jsv,vtaremb_jsv,uttmt_jm1],axis=0)  # ftv,cnn, m
+        # update g_jv
+        print '-------'
+        #print b_jm1v.eval()
+        print self.Wrec.eval()
         g_jv =  T.dot( self.Whb, T.nnet.sigmoid(
                 T.dot(src_jsv,self.Wfbs) + T.dot(tar_jsv,self.Wfbt)+ 
                 G.disconnected_grad(b_jm1v)*self.Wrec +
-                G.disconnected_grad(b_jm1N)*self.Wnon + self.B0 ))
-        
-        return g_jv
+                G.disconnected_grad(b_jm1N)*self.Wnon + self.B0 ))  # fixme 这里是公式(4),和论文描述还是有点出入的，两个CNN的表示被拆分开了
+                                                                    # fixme 并且ftv,cnn的计算也不太一样, disconnect部分应该是
+                                                                    # fixme b_jm1v是除了none部分的value的概率分布，b_jm1N是none的概率
+                                                                    # fixme 如果一维向量维度一样，那么会算出一个数值
+                                                                    # fixme 其中b_jm1v必定使用了广播机制，这将使得整个都被广播
+        return g_jv  # C
 
     def recur(self, b_jm1, ms_j, mt_jm1, mscut_j, mtcut_jm1,
             ssrcpos_js, vsrcpos_js, starpos_js, vtarpos_js ):
       
         # cnn encoding
-        ngms_j,  uttms_j   = self.sCNN.encode(ms_j,  mscut_j)
-        ngmt_jm1,uttmt_jm1 = self.tCNN.encode(mt_jm1,mtcut_jm1)
+        ngms_j,  uttms_j   = self.sCNN.encode(ms_j,  mscut_j)  # source的n-gram vector
+        ngmt_jm1,uttmt_jm1 = self.tCNN.encode(mt_jm1,mtcut_jm1)  # target的j-1轮
 
         # padding dummy vector
         ngms_j   = T.concatenate([ngms_j,T.zeros_like(ngms_j[-1:,:])],axis=0)
@@ -93,8 +100,9 @@ class CNNInformableTracker(BaseNNModule):
                 non_sequences=[ b_jm1[-1], ngms_j, ngmt_jm1,\
                                 uttms_j, uttmt_jm1],\
                 outputs_info=None)
+
         # produce new belief b_j
-        g_j = T.concatenate([g_j,self.B],axis=0)
+        g_j = T.concatenate([g_j,self.B],axis=0)  # (v,1)
         b_j = T.nnet.softmax( g_j )[0,:]
         
         return b_j#, g_j
@@ -133,7 +141,8 @@ class CNNInformableTracker(BaseNNModule):
 
         # produce new belief b_j
         g_j = np.concatenate([g_j,self.B_backup],axis=0)
-        b_j = softmax( g_j )
+        b_j = softmax( g_j ) # 多元分类
+
         
         return b_j
 
@@ -153,7 +162,6 @@ class CNNInformableTracker(BaseNNModule):
         self.B0_backup   = self.params[6].get_value()
         self.sCNN.loadConverseParams()
         self.tCNN.loadConverseParams()
-
 
 # Requestable slot tracker
 class CNNRequestableTracker(BaseNNModule):
@@ -192,9 +200,9 @@ class CNNRequestableTracker(BaseNNModule):
 
     
     def recur(self, ms_j, mt_jm1, mscut_j, mtcut_jm1,
-            ssrcpos_js, vsrcpos_js, starpos_js, vtarpos_js ):
-        
-         # cnn encoding
+            ssrcpos_js, vsrcpos_js, starpos_js, vtarpos_js ):  # 注意与track的区别在于有无lens
+
+        # cnn encoding
         ngms_j,  uttms_j   = self.sCNN.encode(ms_j,  mscut_j)
         ngmt_jm1,uttmt_jm1 = self.tCNN.encode(mt_jm1,mtcut_jm1)
         
@@ -252,8 +260,8 @@ class CNNRequestableTracker(BaseNNModule):
         
         # update b_j
         g_j = np.array([g_j,self.B_backup])
-        b_j = softmax( g_j )
-        
+        b_j = softmax( g_j )  # binary
+
         return b_j
 
     def loadConverseParams(self):
@@ -266,7 +274,7 @@ class CNNRequestableTracker(BaseNNModule):
         self.tCNN.loadConverseParams()
 
 
-# Informable slot tracker
+# Informable slot tracker 下面的都没有被用到
 class NgramInformableTracker(BaseNNModule):
 
     def __init__(self, ng_size, belief_size):

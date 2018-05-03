@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 ######################################################################
 ######################################################################
 #  Copyright Tsung-Hsien Wen, Cambridge Dialogue Systems Group, 2017 #
@@ -135,8 +136,21 @@ class Decoder(BaseNNModule):
                 self.recordTable['s'][idx] = 0.0
     
     # decoder LSTM recurrence
-    def recur(self, w_j, y_j, sshot_tj, oh_jm1, oc_jm1, 
-            intent_t, degree_t, belief_t ,actEmb_t ): 
+    def recur(self, w_j, y_j, sshot_tj, oh_jm1, oc_jm1,  # fixme 这个LSTM是什么意思
+            intent_t, degree_t, belief_t ,actEmb_t ):
+        """
+
+        :param w_j:  上一时刻的word
+        :param y_j:
+        :param sshot_tj:
+        :param oh_jm1:
+        :param oc_jm1:
+        :param intent_t: 常数
+        :param degree_t:
+        :param belief_t:
+        :param actEmb_t:
+        :return:  (oh_j, oc_j), p_j  累积隐层和当前隐层
+        """
         epsln = 10e-6
         # current input
         in_j = T.nnet.sigmoid( self.Wemb[w_j] )
@@ -198,11 +212,11 @@ class Decoder(BaseNNModule):
                             bundle_aj[:,self.doh*3:self.doh*4])
             oc_j =  ig*cx_j + fg*oc_jm1
             oh_j =  og*T.tanh(oc_j)
-            o_j  =  T.nnet.softmax( T.dot(oh_j,self.Who) )
+            o_j  =  T.nnet.softmax( T.dot(oh_j,self.Who) )  # 隐层线性变换过softmax变成概率分布
         else:
             sys.exit('[ERROR]: Unseen decoder structure '+self.struct)
-        # compute output distribution and cross entropy error
-        p_j = o_j[:,y_j] 
+        # compute output distribution and cross entropy error  y_j表示的是当前时刻的正确word的idx
+        p_j = o_j[:,y_j]
 
         return oh_j, oc_j, p_j, snapcost_j
 
@@ -235,17 +249,18 @@ class Decoder(BaseNNModule):
             # set dummy, not used
             belief_t = T.concatenate(belief_t,axis=0)
 
-        # recurrence
+        # recurrence  decode LSTM   #
+        # h, c, loss
         [oh_t,oc_t,p_t,scost_t],_= theano.scan(fn=self.recur,\
-                sequences=[
+                sequences=[    # 迭代变量
                     masked_target_t[:-1],masked_target_t[1:],snapshot_t[1:]],\
-                outputs_info=[self.oh0,self.oc0,None,None],
-                non_sequences=[intent_t,degree_t,belief_t,actEmb_t])
+                outputs_info=[self.oh0,self.oc0,None,None],  # 规定输出格式
+                non_sequences=[intent_t,degree_t,belief_t,actEmb_t])  # 循环过程中不可改变的变量 # 公式(9)
 
         return p_t, scost_t, prior_t, posterior_t, z_t, base_t, debug_t
   
     # function for testing
-    def talk(self, masked_intent_t, belief_t, degree_t, 
+    def talk(self, masked_intent_t, belief_t, degree_t,
             masked_source_t=None, masked_target_t=None,
             scoreTable=None, forced_sample=None):
 
@@ -267,7 +282,6 @@ class Decoder(BaseNNModule):
         
         # stored end node
         endnodes = []
-
         # iterate through actions
         for a in range(actEmb_t.shape[0]):
             # compute how many sentences we want to generate for this act
@@ -325,7 +339,7 @@ class Decoder(BaseNNModule):
                 n = n.prevNode
                 utt.append(n.wordid)
             
-            utt,att,gates = utt[::-1],att[::-1],gates[::-1]
+            utt,att,gates = utt[::-1],att[::-1],gates[::-1]  # ::-1倒序
             utts.append([utt,att,gates])
         return utts, sample_t, prob_t
     
@@ -334,7 +348,7 @@ class Decoder(BaseNNModule):
         
         # forward pass
         in_j    = sigmoid( self.Wemb_backup[n.wordid] )
-        
+
         # action embedding
         if self.ply=='attention':
             actEmb_tj = self.policy.decide(belief_vec_t, 
@@ -392,7 +406,7 @@ class Decoder(BaseNNModule):
             sys.exit('[ERROR]: Unseen decoder structure '+self.struct)
        
         # compute output distribution, logp, and sample
-       
+
         # make sure we won't sample unknown word
         o_j[0] = 0.0
         selected_words = np.argsort(o_j)[::-1][:self.beamwidth]

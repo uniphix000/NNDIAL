@@ -1,8 +1,10 @@
+# -*- coding: utf-8 -*-
 ######################################################################
 ######################################################################
 #  Copyright Tsung-Hsien Wen, Cambridge Dialogue Systems Group, 2017 #
 ######################################################################
 ######################################################################
+
 import sys
 import os
 
@@ -14,17 +16,17 @@ warnings.simplefilter("ignore", DeprecationWarning)
 
 if __name__ == '__main__':
     
-    args = NNSDSOptParser()
+    args = NNSDSOptParser()  # 一个参数命令行获取器，包含mode和config两个参数
     config = args.config
 
     model = NNDial(config,args)
     if args.mode=='train' or args.mode=='adjust': 
-        model.trainNet()    
+        model.trainNet()
     elif args.mode=='test' or args.mode=='valid':
         model.testNet()
     elif args.mode=='interact':
         while True: model.dialog()
-    elif args.mode=='rl':
+    elif args.mode=='rl':   # 强化学习
         model.trainNetRL()
 
 

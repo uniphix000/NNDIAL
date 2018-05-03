@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 ######################################################################
 ######################################################################
 #  Copyright Tsung-Hsien Wen, Cambridge Dialogue Systems Group, 2017 #
@@ -39,11 +40,11 @@ class CNNEncoder(BaseNNModule):
     def __init__(self, vocab_size, hidden_size, pool, level=3):
         self.dh     = hidden_size
         self.di     = vocab_size
-        self.level  = level
         # embedding to hidden transform
         self.Wemb   = theano.shared(0.3 * np.random.uniform(-1.0,1.0,\
                 (self.di,self.dh)).astype(theano.config.floatX))
         # conv weights
+        self.level  = level
         self.Wcv1 = theano.shared(0.3 * np.random.uniform(-1.0,1.0,\
                 (self.dh*3,self.dh)).astype(theano.config.floatX))
         self.Wcv2 = theano.shared(0.3 * np.random.uniform(-1.0,1.0,\
@@ -61,17 +62,23 @@ class CNNEncoder(BaseNNModule):
         return T.dot(wv_t,W)
 
     def convolution(self,cv_input,Wcv,mode='T'):
+        '''
 
+        :param cv_input: (m_l, h_s)
+        :param Wcv:
+        :param mode:
+        :return:
+        '''
         if mode=='T': # theano mode
-            # padding dummy vec
+            # padding dummy vec 边缘
             dummyvec = T.zeros_like(cv_input[:1,:])
-            cv_input = T.concatenate([dummyvec,cv_input,dummyvec],axis=0)
+            cv_input = T.concatenate([dummyvec,cv_input,dummyvec],axis=0)  # (l+2, h_s)
             # convolution
             cv_output,_= theano.scan(fn=self.conv,\
                 sequences=[cv_input[:-2],cv_input[1:-1],cv_input[2:]],\
                 outputs_info=None,
                 non_sequences=Wcv)
-            return cv_output
+            return cv_output  #  (l, h_s)
         else: # numpy mode
             # padding dummy vec
             dummyvec = np.zeros_like(cv_input[:1,:])
@@ -89,10 +96,10 @@ class CNNEncoder(BaseNNModule):
     def encode(self, utt_j, uttcut_j):
        
         # transform word embedding to hidden size
-        emb_j = T.tanh( self.Wemb[utt_j[:uttcut_j],:] )
-        
+        emb_j = T.tanh( self.Wemb[utt_j[:uttcut_j],:] )  # 对Wemb作idx_select，输出为(length, h_s)
+
         # 1st convolution
-        wh1_j = self.convolution(emb_j,self.Wcv1)
+        wh1_j = self.convolution(emb_j,self.Wcv1)  #  (l, h_s)
         if self.pool[0]: # pooling
             wh1_j = pool.max_pool(input=wh1_j,ds=(3,1),ignore_border=False)
         wh1_j = T.tanh(wh1_j)
@@ -107,8 +114,7 @@ class CNNEncoder(BaseNNModule):
             # 3nd convolution
             wh3_j = self.convolution(wh2_j, self.Wcv3)
             if self.pool[2]:
-                wh3_j = pool.pool_2d(input=wh3_j,ds=(3,1),
-                        ignore_border=False)
+                wh3_j = pool.pool_2d(input=wh3_j,ds=(3,1),ignore_border=False)
             # average pooling
             wh3_j = T.tanh(T.sum(wh3_j,axis=0))
         else: # level < 3
@@ -130,7 +136,7 @@ class CNNEncoder(BaseNNModule):
         if self.pool[0]: # max pooling
             wh1_j = max_pool(wh1_j,(3,1),ignore_border=False)
         wh1_j = tanh(wh1_j)
-        
+
         # 2nd convolution
         wh2_j = self.convolution(wh1_j, self.Wcv2_backup,mode='np')
         if self.pool[1]: # max pooling
@@ -250,12 +256,21 @@ class LSTMEncoder(BaseNNModule):
 
 # Bidirectional encoding
 def bidirectional_encode(fEncoder,bEncoder,sent,leng):
+    """
+
+    :param fEncoder:
+    :param bEncoder:
+    :param sent: sentence
+    :param leng: length
+    :return:
+    """
     fw_intent_t = fEncoder.encode(sent,leng)
     bw_intent_t = bEncoder.encode(T.concatenate(
         [ sent[:leng][::-1],sent[leng:] ],axis=0),leng)
     intent_t = T.concatenate(
             [fw_intent_t,bw_intent_t],axis=0)
-    return intent_t
+    return intent_t  # 返回了隐层
+
 
 def bidirectional_read(fEncoder, bEncoder, sent):
     fw_intent_t = fEncoder.read(sent)

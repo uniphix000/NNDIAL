@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 ######################################################################
 ######################################################################
 #  Copyright Tsung-Hsien Wen, Cambridge Dialogue Systems Group, 2017 #
@@ -57,7 +58,7 @@ class Policy(BaseNNModule):
         # all parameters
         self.params = [self.Ws1,    self.Ws2,   self.Ws3    ]
 
-    def encode(self, belief_t, degree_t, intent_t):
+    def encode(self, belief_t, degree_t, intent_t):  # (p_t, x_t, z_t)  公式(8)
         belief_t = T.concatenate(belief_t,axis=0)
         return T.tanh(  T.dot(belief_t,self.Ws1)+
                         T.dot(degree_t,self.Ws2)+
@@ -406,7 +407,7 @@ class AttentivePolicy(BaseNNModule):
         for bvec in belief_t:
             size = bvec.shape[0]
             beliefs_t.append( T.tanh(T.dot(bvec,self.Ws1[bn:bn+size,:])).\
-                    dimshuffle('x',0) )
+                    dimshuffle('x',0) )  # 见公式(11)
             bn += size
         beliefs_t = T.concatenate(beliefs_t,axis=0)
         return beliefs_t 
@@ -421,11 +422,11 @@ class AttentivePolicy(BaseNNModule):
                     np.repeat(
                         T.dot(ohidden_tjm1,self.Wa1)+\
                         T.dot(wemb_tj,self.Wa2), 
-                    10, axis=0)
+                    10, axis=0)  # 公式(12)
 
         # attention mechanism
         atten_t= T.nnet.softmax(T.dot(T.nnet.sigmoid(score_t),self.Va1))[0]
-        actEmb = T.tanh(T.dot(atten_t,belief_t)+degree_t+intent_t)
+        actEmb = T.tanh(T.dot(atten_t,belief_t)+degree_t+intent_t)  # 公式(8)
         return actEmb.dimshuffle('x',0)
 
     def _decideBelief(self,belief_t):

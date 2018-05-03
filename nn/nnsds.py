@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 ######################################################################
 ######################################################################
 #  Copyright Tsung-Hsien Wen, Cambridge Dialogue Systems Group, 2017 #
@@ -60,16 +61,16 @@ class NNSDS(BaseNNModule):
         # init encoder
         if enc=='lstm':
             print '\tinit lstm encoder ...'
-            self.fEncoder = LSTMEncoder( voc_size, ih_size)
+            self.fEncoder = LSTMEncoder( voc_size, ih_size)  # v_s, h_s
             self.bEncoder = LSTMEncoder( voc_size, ih_size)
             self.params['enc'].extend(self.fEncoder.params+self.bEncoder.params)
         
         ##############################################################
         # init requestable tracker
         if trk=='rnn' and req==True: # track requestable slots
-            print '\tinit rnn requestable trackers ...'
+            print '\tinit rnn requestable trackers ...'  # 用多个CNN来对每个requestable slot进行二分
             self.reqtrackers = []
-            for i in range(len(req_size)-1):
+            for i in range(len(req_size)-1):  # list中有0
                 if trkenc=='cnn':# taking cnn features
                     t = CNNRequestableTracker(
                         voc_size,ih_size,voc_size,oh_size)
@@ -85,11 +86,11 @@ class NNSDS(BaseNNModule):
         # init informable tracker
         if trk=='rnn' and inf==True: # track informable slots  
             print '\tinit rnn informable trackers ...'
-            self.infotrackers= []
+            self.infotrackers= []  # 对于每个inf都有一个CNN用来tracking
             for i in range(len(inf_size)-1):
                 b_size = inf_size[i+1]-inf_size[i]
                 if trkenc=='cnn':# taking cnn features
-                    t = CNNInformableTracker(b_size,
+                    t = CNNInformableTracker(b_size,  # belief size用于多分类
                         voc_size,ih_size,voc_size,oh_size)
                 self.infotrackers.append(t)
                 self.params['inftrk'].extend(t.params)
@@ -158,6 +159,7 @@ class NNSDS(BaseNNModule):
         
         # masked source and target utts
         masked_source       = T.imatrix('masked_source')
+        masked_source.tag.test_value = np.random.randint(100)
         masked_target       = T.imatrix('masked_target')
         masked_source_len   = T.ivector('masked_source_len')
         masked_target_len   = T.ivector('masked_target_len')
@@ -182,7 +184,6 @@ class NNSDS(BaseNNModule):
                     inf_label_t, req_label_t, source_feat_t, target_feat_t, 
                     belief_tm1, masked_target_tm1, masked_target_len_tm1, 
                     target_feat_tm1, posterior_tm1): 
-            
             ##############################################################
             ##################### Intent encoder #########################
             ##############################################################
@@ -190,8 +191,8 @@ class NNSDS(BaseNNModule):
             if self.enc=='lstm':
                 masked_intent_t = bidirectional_encode(
                         self.fEncoder,self.bEncoder,
-                        masked_source_t,masked_source_len_t)
-            
+                        masked_source_t,masked_source_len_t)  # pytorch中双向可以合并
+
             ##############################################################
             ########## Belief tracker, informable + requestable ##########
             ##############################################################
@@ -216,18 +217,19 @@ class NNSDS(BaseNNModule):
                 for i in range(len(self.infotrackers)):
                     # slice the current belief tracker output
                     cur_belief_tm1  = belief_tm1[self.iseg[i]:self.iseg[i+1]]
+
                     if self.trkenc=='cnn': # cnn, position features
                         ssrcpos_js  = source_feat_t[0,self.iseg[i]:self.iseg[i+1],:]
                         vsrcpos_js  = source_feat_t[1,self.iseg[i]:self.iseg[i+1],:]
                         starpos_jm1s= target_feat_tm1[0,self.iseg[i]:self.iseg[i+1],:]
                         vtarpos_jm1s= target_feat_tm1[1,self.iseg[i]:self.iseg[i+1],:]
-                    
-                        # tracking 
+
+                        # tracking
                         cur_belief_t = self.infotrackers[i].recur( cur_belief_tm1, 
                                 masked_source_t, masked_target_tm1,
                                 masked_source_len_t, masked_target_len_tm1,
                                 ssrcpos_js, vsrcpos_js, starpos_jm1s, vtarpos_jm1s)
-                
+
                     # semi label
                     cur_label_t = inf_label_t[self.iseg[i]:self.iseg[i+1]]
                     # include cost if training tracker
@@ -310,8 +312,8 @@ class NNSDS(BaseNNModule):
                         utt_group_t, snapshot_t, sample_t)
                 debug_t = prior_t
                
-                # decoder loss 
-                if self.ply!='latent': # deterministic policy 
+                # decoder loss
+                if self.ply!='latent': # deterministic policy
                     print '\t\tincluding decoder loss ...'
                     loss_t += -T.sum(T.log10(prob_t+epsln))
                 else: # variational policy
@@ -381,7 +383,7 @@ class NNSDS(BaseNNModule):
 
         # initial belief state
         belief_0 = T.zeros((self.iseg[-1]),dtype=theano.config.floatX)
-        belief_0 = T.set_subtensor(belief_0[[x-1 for x in self.iseg[1:]]],1.0)
+        belief_0 = T.set_subtensor(belief_0[ [x-1 for x in self.iseg[1:]]],1.0)
         # initial target jm1
         masked_target_tm1    = T.ones_like(masked_target[0])
         masked_target_len_tm1= T.ones_like(masked_target_len[0])
@@ -391,7 +393,7 @@ class NNSDS(BaseNNModule):
         p0 = np.ones((self.dl))/float(self.dl)
         posterior_0 = theano.shared(p0.astype(theano.config.floatX))
 
-        # Dialogue level forward propagation
+        # Dialogue level forward propagation  # fixme
         [_,_,_,_,posterior,sample,loss,companion_loss,prior_loss,posterior_loss,base_loss,
                 reward,baseline,debug], updates= \
                 theano.scan( fn=dialog_recur,
@@ -454,7 +456,7 @@ class NNSDS(BaseNNModule):
             # loss function
             self.cost = T.sum(loss) + 0.1*T.sum(companion_loss) 
             # gradients and updates
-            updates = adam(self.cost, self.flatten_params, lr=lr, reg=reg)
+            updates = adam(self.cost, self.flatten_params, lr=lr, reg=reg)  # fixme
             # default value for function output
             prior_loss = posterior_loss = baseline_loss = self.cost
 
@@ -527,7 +529,7 @@ class NNSDS(BaseNNModule):
             masked_intent_t = []
         return masked_intent_t
 
-    def track(self, belief_tm1, masked_source_t, masked_target_tm1, 
+    def  track(self, belief_tm1, masked_source_t, masked_target_tm1,
             srcfeat_t, tarfeat_tm1):
         
         ##############################################################
@@ -560,7 +562,6 @@ class NNSDS(BaseNNModule):
                     tmp = [np.sum(cur_belief_t[:-2],axis=0),cur_belief_t[-2]]
                     tmp = tmp + [cur_belief_t[-1]] if self.bef=='summary' else tmp
                     belief_t.append( np.array(tmp) )
-        
 
         # Requestable slot belief tracker
         if self.trk=='rnn' and self.req==True:

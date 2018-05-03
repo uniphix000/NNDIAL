@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 ######################################################################
 ######################################################################
 #  Copyright Tsung-Hsien Wen, Cambridge Dialogue Systems Group, 2017 #
@@ -39,6 +40,10 @@ class NNDial(object):
     data preprocessing to DataReader module and delegates the learning to 
     NNSDS module. It implements training based on early stopping and testing
     and interactive interfaces.
+
+    model的主要的交互类：
+    从配置文档存储载入了超参和训练好的模型
+    代表了从DataReader module的数据处理和NNSDS module的学习结果
     '''
     #######################################################################
     # all variables that needs to be save and load from model file, indexed 
@@ -61,26 +66,29 @@ class NNDial(object):
     ply_vars    = ['self.policy','self.latent']
 
     def __init__(self,config=None,opts=None):
-        
+
         if config==None and opts==None:
             print "Please specify command option or config file ..."
-            return
+            return  # 最好raise
 
-        # config parser
-        parser = SafeConfigParser()
+        # config parser 载入config
+        parser = SafeConfigParser()  # configparser的子类，比较专业的做法，可以借鉴
         parser.read(config)
 
         # model file name
-        self.modelfile = parser.get('file','model')
+        self.modelfile = parser.get('file','model')  # 一个section下的具体value
         # get current mode from command argument
         if opts:  self.mode = opts.mode
         # loading pretrained model if any
+
         if os.path.isfile(self.modelfile):
-            if not opts:  self.loadNet(parser,None)
-            else:         self.loadNet(parser,opts.mode)  
-        else: # init network from scrach
+            if not opts:  self.loadNet(parser,None);  # 缺省值为'test'
+            else:         self.loadNet(parser,opts.mode)
+        else: # init network from scratch  如果没有读取到配置文件那么参数清零
             self.initNet(config,opts)
             self.initBackupWeights()
+        print ('===============================')
+
 
     def initNet(self,config,opts=None):
         
@@ -192,7 +200,7 @@ class NNDial(object):
             self.learn_mode, len(self.reader.snapshots), self.latent) 
         
         # setput theano variables
-        self.model.config_theano() 
+        self.model.config_theano()  # 在pytoch复现的时候可以在init的时候也一并初始化了
         if self.debug:
             numofparams, trainable = self.model.numOfParams()
             print '\t\tnumber of parameters : %8d' % numofparams
@@ -235,7 +243,7 @@ class NNDial(object):
             target, target_len, masked_target, masked_target_len,\
             snapshot, change_label, goal, inf_trk_label, req_trk_label,\
             db_degree, srcfeat, tarfeat, finished, utt_group = testset[cnt]
-            
+
             # initial selection
             selected_venue  = -1
             venue_offered   = None
@@ -258,7 +266,7 @@ class NNDial(object):
                 # this turn features
                 srcfeat_t   = srcfeat[t]
 
-                # previous target 
+                # previous target
                 masked_target_tm1, target_tm1, starpos_tm1, vtarpos_tm1, offer = \
                     self.reader.extractSeq(generated_utt_tm1,type='target')
                 
@@ -277,15 +285,17 @@ class NNDial(object):
                         flatten_belief_tm1, masked_source_t, masked_target_tm1, 
                         srcfeat_t, tarfeat_tm1 )
                 flatten_belief_t = np.concatenate(full_belief_t,axis=0)
+
                 # search DB
                 db_degree_t, query = self._searchDB(flatten_belief_t)
                 # score table
                 scoreTable = self._genScoreTable(full_belief_t)
+
                 # generation
                 generated,sample_t,_ = self.model.talk(
                         masked_intent_t,belief_t, db_degree_t, 
-                        masked_source_t, masked_target_t, scoreTable) 
- 
+                        masked_source_t, masked_target_t, scoreTable)
+
                 # choose venue 
                 venues = [i for i, e in enumerate(db_degree_t[:-6]) if e != 0 ]
                 # keep the current venue
@@ -314,7 +324,7 @@ class NNDial(object):
                     #gstats += np.mean( np.array(gen[2][1:]),axis=0 )
                     num_sent += 1
                 
-                # update history belief
+                # update history belief  #fixme 这是干嘛的
                 flatten_belief_tm1 = flatten_belief_t[:self.inf_dimensions[-1]]
 
                 # for calculating success: check requestable slots match
@@ -489,7 +499,7 @@ class NNDial(object):
                 ('Metrics', 'Prec.', 'Recall', 'F-1', 'Acc.')
         print 80*'#'
 
-    def trainNet(self): 
+    def trainNet(self):
 
         if self.debug:
             print 'start network training ...'
@@ -773,7 +783,7 @@ class NNDial(object):
         full_belief_t, belief_t = self.model.track( 
                 flatten_belief_tm1, masked_source_t, masked_target_tm1, 
                 srcfeat_t, tarfeat_tm1 )
-        flatten_belief_t = np.concatenate(full_belief_t,axis=0) 
+        flatten_belief_t = np.concatenate(full_belief_t,axis=0)
         # search
         db_degree_t, query = self._searchDB(flatten_belief_t)
         # additional scoring table
@@ -921,7 +931,7 @@ class NNDial(object):
         
         # initial state
         belief_tm1      = []
-        generated_tm1   = '' 
+        generated_tm1   = ''
         venue_offered   = {}
         selected_venue  = -1
         while True:
@@ -948,26 +958,26 @@ class NNDial(object):
     # search database function
     def _searchDB(self,b):
          
-        query = []
-        q = []
+        query = []  # 仅informable的非dontcare非none的值
+        q = []  # 仅informable的可为dontcare可为none的值
         db_logic = []
         # formulate query for search
         if self.trkinf==True:
             for i in range(len(self.inf_dimensions)-1):
-                b_i = b[self.inf_dimensions[i]:self.inf_dimensions[i+1]]
-                idx = np.argmax(np.array(b_i)) + self.inf_dimensions[i]
+                b_i = b[self.inf_dimensions[i]:self.inf_dimensions[i+1]] # 相同的key下不同的value，对它们进行binary truth?
+                idx = np.argmax(np.array(b_i)) + self.inf_dimensions[i]  # 找出可能性最大的序号
                 # ignore dont care case
-                s2v = self.reader.infovs[idx]
-                if '=dontcare' not in s2v and '=none' not in s2v:
+                s2v = self.reader.infovs[idx]  # {'area=centre','area=east',...} 选出了其中的某一个
+                if '=dontcare' not in s2v and '=none' not in s2v:  # 如果挑出的非空
                     query.append(idx)
                 q.append(idx)
-            # search through db by query
+            # search through db by query  # 这就是论文中的x_t
             for entry in self.reader.db2inf:
-                if set(entry).issuperset(set(query)):
+                if set(entry).issuperset(set(query)):  # query是否包含entry
                     db_logic.append(1)
                 else:
                     db_logic.append(0)
-            # form db count features
+            # form db count features  # degree的分级制
             dbcount = sum(db_logic)
             if dbcount<=3:
                 dummy = [0 for x in range(6)]
@@ -996,7 +1006,7 @@ class NNDial(object):
         
         self.setBackupWeights()
         bundle={
-            'file'  :dict( [(name,eval(name)) for name in self.file_vars]),
+            'file'  :dict( [(name,eval(name)) for name in self.file_vars]),  # eval 把字符串形式的词典转化成词典
             'learn' :dict( [(name,eval(name)) for name in self.learn_vars]),
             'data'  :dict( [(name,eval(name)) for name in self.data_vars] ),
             'gen'   :dict( [(name,eval(name)) for name in self.gen_vars]  ),
@@ -1009,8 +1019,14 @@ class NNDial(object):
         pk.dump(bundle, open(self.modelfile, 'wb'))
 
     def loadNet(self,parser,mode='test'):
+        '''
 
-        print '\n\nloading net from file %s ... ' % self.modelfile
+        :param parser:
+        :param mode:
+        :return:
+        '''
+
+        print '\n\nloading net from file %s ... ' % self.modelfile  # 载入model
         bundle = pk.load(open(self.modelfile, 'rb'))
        
         # load learning variables from config
@@ -1023,7 +1039,7 @@ class NNDial(object):
             self.split          = literal_eval(parser.get('data','split'))
             self.trk_enc        = parser.get('trk','trkenc')
             self.seed           = parser.getint('learn','random_seed')
-        else: # load learning variables from model
+        else: # load learning variables from model 如果预先有model，则下列参数参照model的参数
             self.lr             = bundle['learn']['self.lr']
             self.llogp          = bundle['learn']['self.llogp']
             self.cur_stop_count = bundle['learn']['self.cur_stop_count']
@@ -1184,7 +1200,7 @@ class NNDial(object):
                 # assign score, if exist, +reward
                 score = -0.05 if v=='none' else 0.2
                 # slot value indexing
-                vidx = self.reader.vocab.index('[VALUE_'+s.upper()+']') 
+                vidx = self.reader.vocab.index('[VALUE_'+s.upper()+']')
                 sidx = self.reader.vocab.index('[SLOT_'+s.upper()+']') 
                 scoreTable[sidx] = score 
                 scoreTable[vidx] = score # reward [VALUE_****] if generate

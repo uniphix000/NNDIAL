@@ -45,7 +45,7 @@ def normalize(text):
 
     # replace white spaces in front and end
     text = re.sub(r'^\s*|\s*$','',text)
-    
+
     # normalize phone number
     ms = re.findall('\(?(\d{3})\)?[-.\s]?(\d{3})[-.\s]?(\d{4})',text)
     if ms:
@@ -56,7 +56,7 @@ def normalize(text):
                 sidx -= 1
             eidx = text.find(m[-1],sidx)+len(m[-1])
             text = text.replace(text[sidx:eidx],''.join(m))
-    
+
     # normalize postcode
     ms = re.findall('([a-z]{1}[\. ]?[a-z]{1}[\. ]?\d{1,2}[, ]+\d{1}[\. ]?[a-z]{1}[\. ]?[a-z]{1}|[a-z]{2}\d{2}[a-z]{2})',text)
     if ms:
@@ -106,6 +106,7 @@ def normalize(text):
         else:
             i += 1
     text = ' '.join(tokens)
+
     
     return text
 """

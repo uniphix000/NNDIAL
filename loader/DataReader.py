@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 ######################################################################
 ######################################################################
 #  Copyright Tsung-Hsien Wen, Cambridge Dialogue Systems Group, 2017 #
@@ -23,7 +24,7 @@ from nltk.stem.wordnet import WordNetLemmatizer
 
 digitpat = re.compile('\d+')
 
-class DataSplit(object):
+class DataSplit(object):  # 用于划分数据
     # data split helper , for split dataset into train/valid/test
     def __init__(self,split):
         self.split = split
@@ -47,6 +48,9 @@ class DataSplit(object):
         return data[s:]
 
 class DataReader(object):
+    '''
+    载入语料数据并切分，载入词汇表，构建数据库，
+    '''
     inputvocab = []
     outputvocab= []
     ngrams = {}
@@ -64,7 +68,7 @@ class DataReader(object):
         self.index = 0          # index for accessing data
         
         # data manipulators 
-        self.split  = DataSplit(split)  # split helper
+        self.split  = DataSplit(split)  # split helper 初始化
         self.trkenc = trkenc
         self.lengthen = lengthen
         self.shuffle= shuffle
@@ -76,19 +80,18 @@ class DataReader(object):
 
         # loading files
         self.db       = self.loadjson(dbfile)
-        self.s2v      = self.loadjson(s2vfile)
-        self.semidict = self.loadjson(semifile)
+        self.s2v      = self.loadjson(s2vfile)  # slot to value {'requestable':,'informable':（预设）,'other':...}
+        self.semidict = self.loadjson(semifile)  # 一对多词
         self.dialog   = self.loadjson(corpusfile)
-
         # producing slot value templates and db represetation
         self.prepareSlotValues()
-        self.structureDB()
+        self.structureDB()  # 将kb变成idx的list
         
         # load dialog
         self.loadVocab()
         if mode!='sds':
-            self.loadDialog()
-            self.loadSemantics()
+            self.loadDialog()  # 主要是完成了value-->key的替换
+            self.loadSemantics()  # 类似于一个parser，匹配每句话中出现的info/req_slots，并匹配分degree
         
         # goal
         self.parseGoal()
@@ -100,10 +103,14 @@ class DataReader(object):
         if verbose : self._printStats()
 
     def loadDialog(self):
+        """
+        index dialog
+        :return:
+        """
 
         # index words and make it suitable for NN input
-        self.sourceutts = []
-        self.targetutts = []
+        self.sourceutts = []  # source端的utterance
+        self.targetutts = []  # target端的utterance
         self.masked_sourceutts = []
         self.masked_targetutts = []
         self.sourcecutoffs = []
@@ -177,7 +184,7 @@ class DataReader(object):
                 # extract system side sentence feature    
                 sent = turn['sys']['sent']
                 mtar, tar, spos, vpos, venues \
-                    = self.extractSeq(sent,type='target')
+                    = self.extractSeq(sent,type='target')  # venues是指实体的name
 
                 # store sentence group
                 utt_group.append(self.sentGroup[groupidx])
@@ -335,7 +342,8 @@ class DataReader(object):
             # positional information
             self.delsrcpos.append(srcpos)
             self.deltarpos.append(tarpos)
-    
+
+
     def loadSemantics(self):
 
         # sematic labels
@@ -447,13 +455,23 @@ class DataReader(object):
                     vec[self.reqs.index(sem)] = 1
                 req_semi.append(vec)
             
-            self.info_semis.append(semi_idxs)
+            self.info_semis.append(semi_idxs)  # 一个稀疏向量[0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
             self.req_semis.append( req_semi )
-            self.db_logics.append(db_logic)
-        print 
-    
+            self.db_logics.append(db_logic)  # 为每句话打的匹配分
+
+
     def extractSeq(self,sent,type='source',normalise=False,index=True):
-    
+        '''
+        将句子delexicalised,index化，并提取句子中包含slot-value信息在整个kb中的位置
+        allvs = ['area=centre', 'area=east', 'area=north', 'area=south', 'area=west', 'area=dontcare', 'area=none', 'food=afghan', 'food=african',
+        slotpos = [[9], [9], [9], [9], [9], [9], [9], [13
+        valpos = [[], [], [], [8], [], [], [], [], [],
+        :param sent: 输入的原始句子
+        :param type:
+        :param normalise:
+        :param index: 是否index化的flag
+        :return:  midx, idx, sltpos, valpos, names  替换后的idx表示， 未替换， slot_value的对应情况（类似onehot）,..,name的信息[VALUE_NAME]
+        '''
         # setup vocab
         if type=='source':  vocab = self.vocab
         elif type=='target':vocab = self.vocab
@@ -476,10 +494,10 @@ class DataReader(object):
             idx = words
         
         # delexicalise all
-        sent = self.delexicalise(' '.join(words),mode='all')
-        sent = re.sub(digitpat,'[VALUE_COUNT]',sent)
+        sent = self.delexicalise(' '.join(words),mode='all')  # value-->key的替换
+        sent = re.sub(digitpat,'[VALUE_COUNT]',sent)  # 正则表达式，将数字替换成[]表示
         words= sent.split()
-        
+
         # formulate delex positions
         allvs = self.infovs+self.reqs
         sltpos = [[] for x in allvs]
@@ -513,10 +531,17 @@ class DataReader(object):
             midx = map(lambda w: vocab.index(w) if w in vocab else 0, words)
         else:
             midx = words
-                    
         return midx, idx, sltpos, valpos, names
 
     def delexicalise(self,utt,mode='all'):
+        '''
+        value-->key
+        </s> there are several restaurant -s in the south part of town that serve expensive food . do you have a cuisine preference ? </s>
+        </s> there are several restaurant -s in the [VALUE_AREA]::south [SLOT_AREA]::area that serve [VALUE_PRICERANGE]::expensive [SLOT_FOOD]::food . do you have a [SLOT_FOOD]::food preference ? </s>
+        :param utt:
+        :param mode:
+        :return:
+        '''
         inftoks =   ['[VALUE_'+s.upper()+']' for s in self.s2v['informable'].keys()] + \
                     ['[SLOT_' +s.upper()+']' for s in self.s2v['informable'].keys()] + \
                     ['[VALUE_DONTCARE]','[VALUE_NAME]'] +\
@@ -524,7 +549,7 @@ class DataReader(object):
         reqtoks =   ['[VALUE_'+s.upper()+']' for s in self.s2v['requestable'].keys()]
         for i in range(len(self.values)):
             # informable mode, preserving location information
-            if mode=='informable'and self.slots[i] in inftoks:
+            if mode=='informable' and self.slots[i] in inftoks:
                 tok = self.slots[i]+'::'+(self.supervalues[i]).replace(' ','-')
                 utt = (' '+utt+' ').replace(' '+self.values[i]+' ',' '+tok+' ')
                 utt = utt[1:-1]
@@ -547,7 +572,10 @@ class DataReader(object):
         return utt    
     
     def prepareSlotValues(self):
-        
+        """
+        向s2v中加入kb里已存在键的requestable值
+        :return:
+        """
         print '\tprepare slot value templates ...'
         # put db requestable values into s2v
         for e in self.db:
@@ -556,7 +584,7 @@ class DataReader(object):
                     self.s2v['requestable'][s].append(v.lower())
                 if self.s2v['other'].has_key(s):
                     self.s2v['other'][s].append(v.lower())
-        # sort values
+        # sort values  # 将值排序
         for s,vs in self.s2v['informable'].iteritems():
             self.s2v['informable'][s] = sorted(list(set(vs)))
         for s,vs in self.s2v['requestable'].iteritems():
@@ -564,13 +592,13 @@ class DataReader(object):
         for s,vs in self.s2v['other'].iteritems():
             self.s2v['other'][s] = sorted(list(set(vs)))
 
-        # make a 1-on-1 mapping for delexicalisation
-        self.supervalues = []
-        self.values = []
-        self.slots  = []
+        # make a 1-on-1 mapping for delexicalisation  # 从semidict中提取
+        self.supervalues = []  # 最简单的最抽象的value food
+        self.values = []  # type of food , cuisine...
+        self.slots  = []  # SLOT_FOOD
         
         for s,vs in self.s2v['informable'].iteritems():
-             # adding slot delexicalisation
+            # adding slot delexicalisation
             self.supervalues.extend([s for x in self.semidict[s]])
             self.values.extend([normalize(x) for x in self.semidict[s]])
             self.slots.extend(['[SLOT_'+s.upper()+']' for x in self.semidict[s]])
@@ -596,15 +624,14 @@ class DataReader(object):
         # sorting according to length
         self.values, self.supervalues, self.slots = zip(*sorted(\
                 zip(self.values,self.supervalues,self.slots),\
-                key=lambda x: len(x[0]),reverse=True))
-        
+                key=lambda x: len(x[0]),reverse=True))  # 将三个list按照长度同步的进行排序
+
         # for generating semantic labels
-        self.infovs = []
-        self.infoseg = [0]
-        self.reqs = []
-        self.reqseg = [0]
-        self.dontcare = []
-        
+        self.infovs = []  # {'area=centre','area=east',...}
+        self.infoseg = [0]  # s2v informable中有3个键,指示长度:[0,7,100,105]
+        self.reqs = []  # 3个键与exit和none的组合
+        self.reqseg = [0]  #
+        self.dontcare = []  # 如果用户不指名信息，则从dontcare中随机
         for s in sorted(self.s2v['informable'].keys()):
             self.infovs.extend([s+'='+v for v in self.s2v['informable'][s]])
             self.infovs.append(s+'=dontcare')
@@ -612,7 +639,7 @@ class DataReader(object):
             self.infoseg.append(len(self.infovs)) 
             # dont care values
             self.dontcare.append(len(self.infovs)-1)
-            self.dontcare.append(len(self.infovs)-2) 
+            self.dontcare.append(len(self.infovs)-2)  # fixme
         for s in sorted(self.s2v['informable'].keys()):
             self.reqs.extend([s+'=exist',s+'=none'])
             self.reqseg.append(len(self.reqs))
@@ -621,14 +648,15 @@ class DataReader(object):
             self.reqseg.append(len(self.reqs))
 
         # for ngram indexing
-        self.ngs2v = []
+        self.ngs2v = []  # [('area', ['centre', 'east', 'north', 'south', 'west', 'any', 'none']), ...]
         for s in sorted(self.s2v['informable'].keys()):
             self.ngs2v.append( (s, self.s2v['informable'][s] + ['any','none']) )
         for s in sorted(self.s2v['informable'].keys()):
             self.ngs2v.append( (s,['exist','none']) )
         for s in sorted(self.s2v['requestable'].keys()):
             self.ngs2v.append( (s,['exist','none']) )
-    
+
+
     def loadjson(self,filename):
         with open(filename) as data_file:
             for i in range(5):
@@ -689,6 +717,11 @@ class DataReader(object):
         self.data['test']  = self.split.test(corpus)
 
     def read(self,mode='train'):
+        '''
+        相当于一个迭代器，根据index每次弹出一个dialog
+        :param mode:
+        :return:
+        '''
         ## default implementation for read() function
         if self.mode!=mode:
             self.mode = mode
@@ -783,17 +816,17 @@ class DataReader(object):
         print '\tformatting DB ...'
         
         # represent each db entry with informable values
-        self.db2inf = []
-        self.db2idx  = []
-        self.idx2db = []
-        self.idx2ent= {}
-        for i in  range(len(self.db)):
+        self.db2inf = []  # [[0, 46, 100], [1, 44, 100], [0, 42, 101], [3, 24, 101],... 将db中的各个条目变成idx表示
+        self.db2idx  = []  # [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 0, 14,  将bd中的条目可重复的标上序号，注意：是informable的可重复
+        self.idx2db = []  # [[[0, 46, 100], [0, 46, 100], [0, 46, 100]], [[1, 44, 100]], [[0, 42, 101], [0, 42, 101], [0, 42, 101], [0, 42, 101], [0, 42, 101], [0, 42, 101]], [[3, 24, 101] 序号对应的db中的idx表示
+        self.idx2ent= {}  # {0: [{'name': 'pizza hut city centre', 'area': 'centre',...  序号对应原始的条目
+        for i in range(len(self.db)):
             e = self.db[i]
             e2inf = []
             for s,v in e.iteritems():
                 if s in self.s2v['informable']:
-                    e2inf.append( self.infovs.index(s+'='+v) )
-            e2inf = sorted(e2inf)
+                    e2inf.append( self.infovs.index(s+'='+v) )  # 返回idx
+            e2inf = sorted(e2inf)  # ['area=..','name=..',...]=>[0,46,100]
 
             # if not repeat, create new entry
             if e2inf not in self.db2inf:
@@ -807,19 +840,26 @@ class DataReader(object):
                 self.idx2ent[self.db2inf.index(e2inf)].append(e)
 
         # create hash for finding db index by name
-        self.n2db = {}
+        self.n2db = {}  # 根据name来索引db中的条目
         for i in range(len(self.db)):
             self.n2db[self.db[i]['name'].lower()] = self.db2idx[i]
-        
+
     def loadVocab(self):
         
         # iterate through dialog and make vocab
         self.inputvocab = ['[VALUE_DONTCARE]','[VALUE_COUNT]']
         self.outputvocab= ['[VALUE_DONTCARE]','[VALUE_COUNT]']
         self.vocab = []
-       
+
         # init inputvocab with informable values
         for s,vs in self.s2v['informable'].iteritems():
+            for v in vs:
+                if v=='none': continue
+                self.inputvocab.extend(v.split())
+            self.inputvocab.extend( ['[SLOT_'+s.upper()+']','[VALUE_'+s.upper()+']'])
+            self.outputvocab.extend(['[SLOT_'+s.upper()+']','[VALUE_'+s.upper()+']'])
+
+        for s,vs in self.s2v['requestable'].iteritems():
             for v in vs:
                 if v=='none': continue
                 self.inputvocab.extend(v.split())
@@ -862,33 +902,40 @@ class DataReader(object):
                     type='target',index=False)
 
                 ovocab.extend(words)
-                
+                #print words
                 # sentence group key
                 key = tuple(set(sorted(
                     [lmtzr.lemmatize(w) for w in words if w not in self.stopwords])))
+                #print '-------------'
+                #print key
+                #print sentKeys
                 if key in sentKeys:
                     sentKeys[key][1] += 1
                     self.sentGroup.append( sentKeys[key][0] )
                 else:
                     sentKeys[key] = [len(sentKeys),1]
                     self.sentGroup.append( sentKeys[key][0] )
-                
+
+                #print self.sentGroup
+                #print '============='
                 # user side
                 words = self.delexicalise(turn['usr']['transcript']).split()
-                mwords,words,_,_,_ = self.extractSeq(turn['sys']['sent'],\
+                mwords,words,_,_,_ = self.extractSeq(turn['usr']['transcript'],\
                     type='source',index=False)
                 ivocab.extend(mwords)
-                #ivocab.extend(words)
+                ivocab.extend(words)
                 """
                 for hyp in t['usr']['asr']:
                     words = self.delexicalise(normalize(hyp['asr-hyp'])).split()
                     ivocab.extend(words)
                 """
-        print
-        # re-assigning sentence group w.r.t their frequency
+
+        # re-assigning sentence group w.r.t their frequency  # TODO
         mapping = {}
         idx = 0
         cnt = 0
+        #print sentKeys;
+        #print mapping
         for key,val in sorted(sentKeys.iteritems(),key=lambda x:x[1][1],reverse=True):
             mapping[val[0]] = idx
             #print idx, val[1], key
@@ -899,7 +946,7 @@ class DataReader(object):
                 (float(cnt)/float(len(self.sentGroup))*100)
         for i in range(len(self.sentGroup)):
             self.sentGroup[i] = min(mapping[self.sentGroup[i]],self.dl-1)
-        
+        #print self.sentGroup;exit()
         # set threshold for input vocab
         counts = dict()
         for w in ivocab:
@@ -919,7 +966,8 @@ class DataReader(object):
         # the whole vocab
         self.vocab = ['<unk>','</s>','<slot>','<value>'] + \
                 list(set(self.inputvocab[4:]).union(self.outputvocab[2:]))
-       
+        #print self.dialog
+
         # create snapshot dimension
         self.snapshots = ['OFFERED','CHANGED']
         for w in self.outputvocab:
@@ -951,7 +999,6 @@ class DataReader(object):
                 #goal['req'].append(self.reqs.index(s+'=exist'))
                 goal[1][self.reqs.index(s+'=exist')] = 1
             self.goals.append(goal)
-        
             # compute corpus success
             m_targetutt = self.masked_targetutts[i]
             m_targetutt_len = self.masked_targetcutoffs[i]
@@ -966,12 +1013,11 @@ class DataReader(object):
                 for requestable in requestables:
                     if '[VALUE_'+requestable.upper()+']' in sent_t:
                         requests.append(self.reqs.index(requestable+'=exist'))
-            # compute success
+            # compute success 在对话过程中slot填满
             if offered: 
                 vmc += 1.
                 if set(requests).issuperset(set(goal[1].nonzero()[0].tolist())):
                     success += 1.
-
         print '\tCorpus VMC       : %2.2f%%' % (vmc/float(len(self.dialog))*100)
         print '\tCorpus Success   : %2.2f%%' % (success/float(len(self.dialog))*100)
         
